@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Resultados de BLAST</title>
+</head>
+<body>
+    <h1>Resultados de BLAST</h1>
+    
+    {% if results %}
+        <table border="1">
+            <tr>
+                <th>Query ID</th>
+                <th>Subject ID</th>
+                <th>% Identidad</th>
+                <th>Longitud Alineamiento</th>
+                <th>Mismatch</th>
+                <th>Gap Open</th>
+                <th>Inicio Query</th>
+                <th>Fin Query</th>
+                <th>Inicio Subject</th>
+                <th>Fin Subject</th>
+                <th>E-Value</th>
+                <th>Score</th>
+            </tr>
+            {% for line in results %}
+                <tr>
+                    {% for field in line.split() %}
+                        <td>{{ field }}</td>
+                    {% endfor %}
+                </tr>
+            {% endfor %}
+        </table>
+    {% else %}
+        <p>No se encontraron resultados.</p>
+    {% endif %}
+    
+    <br>
+    <a href="/">Volver al inicio</a>
+</body>
+</html>
+
