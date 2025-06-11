@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ejecutar BLAST</title>
+</head>
+<body>
+    <h1>Ejecutar BLAST</h1>
+    
+    <form action="{{ url_for('run_blast', _external=True) }}" method="post" enctype="multipart/form-data">
+        <label for="blast_type">Tipo de BLAST:</label>
+        <select name="blast_type" id="blast_type">
+            <option value="blastn">BLASTN</option>
+            <option value="blastp">BLASTP</option>
+            <option value="blastx">BLASTX</option>
+            <option value="tblastn">TBLASTN</option>
+            <option value="megablast">MEGABLAST</option>
+        </select>
+        <br><br>
+
+        <label for="database">Seleccionar Base de Datos:</label>
+        <select name="database" id="database">
+            {% if db_list %}
+                {% for db in db_list %}
+                    <option value="{{ db }}">{{ db }}</option>
+                {% endfor %}
+            {% else %}
+                <option disabled>No se detectaron bases de datos</option>
+            {% endif %}
+        </select>
+        <br><br>
+
+        <label for="sequence">Secuencia (FASTA):</label><br>
+        <textarea name="sequence" id="sequence" rows="5" cols="60" placeholder="Pega tu secuencia aquí"></textarea>
+        <br><br>
+
+        <label for="file">O cargar un archivo FASTA (máx. 5MB):</label>
+        <input type="file" name="file" id="file" accept=".fasta,.fa,.txt">
+        <br><br>
+
+        <button type="submit">Ejecutar BLAST</button>
+    </form>
+
+    <hr>
+
+    <h2>Bases de Datos Detectadas:</h2>
+    <ul>
+        {% for db in db_list %}
+            <li>{{ db }}</li>
+        {% endfor %}
+    </ul>
+
+    {% if not db_list %}
+        <p style="color: red;">No se detectaron bases de datos en el servidor.</p>
+    {% endif %}
+
+    <h2>Debugging Flask: db_list</h2>
+    <p>{{ db_list }}</p>
+
+</body>
+</html>
+

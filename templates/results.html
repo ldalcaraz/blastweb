@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Resultados de BLAST</title>
+    <script>
+        function checkResults() {
+            fetch("{{ result_url }}")
+                .then(response => {
+                    if (response.status === 200) {
+                        response.text().then(data => {
+                            document.getElementById("results").innerText = data;
+                            document.getElementById("loading").style.display = "none";
+                            document.getElementById("results").style.display = "block";
+                        });
+                    } else {
+                        console.log("Resultado aún no disponible, reintentando en 3 segundos...");
+                        setTimeout(checkResults, 3000); // Retry every 3 seconds
+                    }
+                })
+                .catch(error => console.error("Error checking results:", error));
+        }
+
+        window.onload = checkResults;
+    </script>
+</head>
+<body>
+    <h1>Resultados de BLAST</h1>
+    <p id="loading">Esperando resultados... Esta página se actualizará automáticamente.</p>
+    <pre id="results" style="display: none;"></pre>
+</body>
+</html>
+

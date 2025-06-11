@@ -1,0 +1,142 @@
+from flask import Flask, render_template, request, Response, jsonify
+import os
+import sys
+import subprocess
+import time
+
+app = Flask(__name__, static_url_path='/blast_web/static')
+app.config['APPLICATION_ROOT'] = '/blast_web'
+
+# Directorios de trabajo en el clúster
+WORK_DIR = "/home/tmp/"
+RESULT_DIR = "/home/tmp/"
+DB_FOLDER = "/home/tmp/databases"
+SOURCE_DB_FOLDER = "/var/www/html/blast_web/databases"
+
+# Diccionario con las rutas explícitas de BLAST
+BLAST_BIN = {
+    'blastn': '/usr/bin/blastn',
+    'blastp': '/usr/bin/blastp',
+    'blastx': '/usr/bin/blastx',
+    'tblastn': '/usr/bin/tblastn',
+    'megablast': '/usr/bin/blastn'
+}
+
+@app.route('/')
+@app.route('/index')
+def index():
+    try:
+        db_list = [d for d in os.listdir(DB_FOLDER) if os.path.isdir(os.path.join(DB_FOLDER, d))]
+        sys.stderr.write(f"[DEBUG] Databases detected: {db_list}\n")
+    except Exception as e:
+        sys.stderr.write(f"[ERROR] Failed to list databases: {str(e)}\n")
+        db_list = []
+
+    return render_template('index.html', db_list=db_list)
+
+@app.route('/run_blast', methods=['POST'])
+def run_blast():
+    blast_type = request.form.get('blast_type')
+    database = request.form.get('database')
+    sequence = request.form.get('sequence')
+    output_format = request.form.get('output_format', '6')  # Formato tabular por defecto
+
+    sys.stderr.write(f"[DEBUG] Blast Type: {blast_type}\n")
+    sys.stderr.write(f"[DEBUG] Selected Database: {database}\n")
+    sys.stderr.write(f"[DEBUG] Selected Output Format: {output_format}\n")
+
+    if not sequence:
+        sys.stderr.write("[ERROR] No sequence provided!\n")
+        return "Error: No sequence provided", 400
+
+    # Generar nombres de archivos únicos basados en timestamp
+    job_id = str(int(time.time()))
+    job_script = f"{WORK_DIR}blast_job_{job_id}.scr"
+    input_file = f"{WORK_DIR}blast_job_{job_id}.fasta"
+    output_file = f"{WORK_DIR}blast_job_{job_id}.out"
+    final_output = f"{RESULT_DIR}blast_job_{job_id}.out"
+
+    # Guardar la secuencia en /home/tmp/
+    with open(input_file, "w") as temp_input:
+        temp_input.write(sequence)
+        temp_input.flush()
+        os.fsync(temp_input.fileno())
+
+    os.chmod(input_file, 0o644)
+
+    if not os.path.exists(input_file):
+        sys.stderr.write(f"[ERROR] Temporary file was not created: {input_file}\n")
+        return f"Error: Temporary file not found ({input_file})", 500
+
+    sys.stderr.write(f"[DEBUG] Created temporary input file: {input_file}\n")
+
+    # Verificar si la base de datos está en /home/tmp/databases/
+    db_path = os.path.join(DB_FOLDER, database, database)
+    if db_path.endswith('.fasta'):
+        db_path = db_path[:-6]  # Eliminar extensión .fasta
+
+    if not (os.path.exists(db_path + ".nin") or os.path.exists(db_path + ".pin")):
+        sys.stderr.write(f"[WARNING] Database {database} not found in /home/tmp/. Copying...\n")
+
+        original_db_path = os.path.join(SOURCE_DB_FOLDER, database)
+        
+        if os.path.exists(original_db_path):
+            copy_cmd = f"cp -r {original_db_path} {DB_FOLDER}/"
+            try:
+                subprocess.run(copy_cmd, shell=True, check=True)
+                sys.stderr.write(f"[INFO] Database {database} copied successfully to {DB_FOLDER}/\n")
+            except subprocess.CalledProcessError as e:
+                sys.stderr.write(f"[ERROR] Failed to copy database: {e}\n")
+                return f"Error: Could not copy database {database}", 500
+        else:
+            sys.stderr.write(f"[ERROR] Source database {database} does not exist in {SOURCE_DB_FOLDER}\n")
+            return f"Error: Source database {database} does not exist", 500
+
+    # Obtener el ejecutable correcto de BLAST
+    blast_exe = BLAST_BIN.get(blast_type, '/usr/bin/blastn')
+
+    # Crear script de ejecución en /home/tmp/
+    with open(job_script, "w") as script_file:
+        script_file.write(f"""#!/bin/bash
+source /etc/profile
+source /opt/sge/default/common/settings.sh
+{blast_exe} -query {input_file} -db {db_path} -out {output_file} -outfmt {output_format}
+""")
+
+    os.chmod(job_script, 0o755)
+
+    # Enviar el trabajo a la cola con qsub usando worker
+    qsub_command = f"/bin/bash -c 'source /etc/profile && source /opt/sge/default/common/settings.sh && qsub -cwd -j y -S /bin/bash -b y -N blast_{job_id} {job_script}'"
+
+    try:
+        subprocess.run(qsub_command, shell=True, check=True)
+        sys.stderr.write(f"[DEBUG] Submitted job with ID {job_id}\n")
+    except subprocess.CalledProcessError as e:
+        sys.stderr.write(f"[ERROR] Failed to submit job: {e}\n")
+        return f"Error: Failed to submit job {e}", 500
+
+#    return jsonify({"message": "Job submitted", "job_id": job_id, "result_url": f"/results/blast_job_{job_id}.out"})
+
+from flask import redirect, url_for
+
+return redirect(url_for('wait_for_results', job_id=job_id))
+
+@app.route('/results/<filename>')
+def get_results(filename):
+    result_path = os.path.join(RESULT_DIR, filename)
+
+    if not os.path.exists(result_path):
+        return "Result not available yet. Try again later.", 404
+
+    with open(result_path, 'r') as f:
+        blast_output = f.read()
+
+    return Response(blast_output, mimetype='text/plain')
+
+@app.errorhandler(404)
+def page_not_found(e):
+    return "<h1>404 - Page Not Found</h1><p>The requested URL was not found on this server.</p>", 404
+
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0')
+
